@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tube Light vs White LED — Simulation + Report</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/p5@1.6.0/lib/p5.min.js"></script>
+<style>
+  body { margin:0; background:#06070a; color:#e6eef8; font-family:Inter, Arial, sans-serif; overflow-x:hidden;}
+  #ui {
+    position:absolute; top:18px; right:18px; width:320px;
+    background:rgba(255,255,255,0.035); border:1px solid rgba(255,255,255,0.06);
+    padding:14px; border-radius:12px; backdrop-filter:blur(6px);
+  }
+  h3 { margin:0 0 10px 0; font-size:16px; color:#fff; }
+  .section { margin-bottom:12px; }
+  label { display:block; font-size:13px; color:#dbe7ff; margin-bottom:6px; }
+  input[type=range] { width:100%; }
+  select, button { width:100%; padding:8px 10px; border-radius:8px; border:none; background:#1b6bff; color:#fff; cursor:pointer;}
+  .muted { color:#9fb0d3; font-size:12px; margin-top:6px; }
+  .stat { font-size:13px; color:#cfe7ff; margin-top:6px; }
+  #footer { position:absolute; left:18px; bottom:18px; color:#92a2c1; font-size:13px; }
+  #report {
+    position:relative; margin-top:windowHeight; padding:20px;
+    background:#0c0f14; border-top:2px solid #1b6bff;
+    max-width:1000px; color:#cfe7ff; font-size:14px; line-height:1.5em;
+  }
+</style>
+</head>
+<body>
+<div id="ui">
+<h3>Tube Light vs White LED — Interactive Simulation</h3>
+<div class="section">
+  <label>Tube — Power (W) <span id="tubePowerVal">36</span> W</label>
+  <input id="tubePower" type="range" min="6" max="80" value="36">
+  <label>Tube Phosphor Efficiency <span id="tubeEffVal">0.8</span></label>
+  <input id="tubeEff" type="range" min="0.4" max="1.0" step="0.01" value="0.8">
+  <label>Starter</label>
+  <select id="starter">
+    <option value="electronic">Electronic Ballast</option>
+    <option value="magnetic">Magnetic + Starter</option>
+  </select>
+  <button id="tubeToggle">Turn Tube ON</button>
+  <div class="stat" id="tubeStatus">Tube: OFF</div>
+  <div class="stat" id="tubeLux">Tube Lux: 0 lx</div>
+</div>
+<hr style="border:none;height:1px;background:rgba(255,255,255,0.06);margin:10px 0;">
+<div class="section">
+  <label>LED — Power (W) <span id="ledPowerVal">20</span> W</label>
+  <input id="ledPower" type="range" min="1" max="60" value="20">
+  <label>LED Phosphor Efficiency <span id="ledEffVal">0.9</span></label>
+  <input id="ledEff" type="range" min="0.4" max="1.0" step="0.01" value="0.9">
+  <label>LED Mode</label>
+  <select id="ledMode">
+    <option value="phosphor">Phosphor-converted (Blue + YAG)</option>
+    <option value="rgb">RGB Mix</option>
+  </select>
+  <button id="ledToggle">Turn LED ON</button>
+  <div class="stat" id="ledStatus">LED: OFF</div>
+  <div class="stat" id="ledLux">LED Lux: 0 lx</div>
+</div>
+<div class="muted">Tip: Use Magnetic Starter to show flicker, and adjust phosphor efficiency for color change.</div>
+</div>
+<div id="footer">Interactive Simulation — Left: Tube Light | Right: LED</div>
+
+<!-- Report Section -->
+<div id="report">
+  <h2>Simulation Report</h2>
+  <div id="reportContent">
+    <p>Tube Light and LED simulation is interactive. Use the sliders and toggles above to adjust power, efficiency, starter type, and LED mode.</p>
+    <p id="tubeReport">Tube Status: OFF | Power: 36 W | Efficiency: 0.8 | Lux: 0 lx</p>
+    <p id="ledReport">LED Status: OFF | Power: 20 W | Efficiency: 0.9 | Lux: 0 lx</p>
+    <h3>Working Explanation</h3>
+    <p id="workingText">
+      Tube Light: Gas discharge excites mercury → UV radiation → Phosphor coating converts UV to visible light.<br>
+      LED: Semiconductor emits blue light → Phosphor layer converts blue to white light (or RGB mix for color LEDs).
+    </p>
+  </div>
+</div>
+
+<script>
+let tube={}, led={};
+let tubeElectrons=[], tubeUV=[];
+let ledParticles=[], ledPhosphorFlare=[];
+let tubeOn=false, ledOn=false;
+let flickerStage=0, flickerTimer=0;
+let prevLedIntensity=0;
+
+function setup(){
+  createCanvas(windowWidth, windowHeight*0.8);
+  angleMode(DEGREES); rectMode(CENTER);
+  initGeometry();
+  initParticles();
+
+  // UI bindings
+  select('#tubePower').input(()=>{select('#tubePowerVal').html(select('#tubePower').value()); updateReport();});
+  select('#tubeEff').input(()=>{select('#tubeEffVal').html(select('#tubeEff').value()); updateReport();});
+  select('#ledPower').input(()=>{select('#ledPowerVal').html(select('#ledPower').value()); updateReport();});
+  select('#ledEff').input(()=>{select('#ledEffVal').html(select('#ledEff').value()); updateReport();});
+
+  select('#tubeToggle').mousePressed(()=>{
+    tubeOn=!tubeOn;
+    select('#tubeToggle').html(tubeOn?'Turn Tube OFF':'Turn Tube ON');
+    select('#tubeStatus').html('Tube: '+(tubeOn?'ON':'OFF'));
+    if(tubeOn){
+      if(select('#starter').value()==='magnetic'){flickerStage=1;flickerTimer=0;}
+      else{flickerStage=2;}
+      burstTubeElectrons(40);
+    } else flickerStage=0;
+    updateReport();
+  });
+
+  select('#ledToggle').mousePressed(()=>{
+    ledOn=!ledOn;
+    select('#ledToggle').html(ledOn?'Turn LED OFF':'Turn LED ON');
+    select('#ledStatus').html('LED: '+(ledOn?'ON':'OFF'));
+    if(ledOn) burstLEDParticles(30);
+    updateReport();
+  });
+}
+
+function initGeometry(){
+  tube.x=width*0.28; tube.y=height*0.4; tube.w=min(width*0.46,980); tube.h=min(160,height*0.18); tube.radius=36;
+  led.x=width*0.72; led.y=height*0.4; led.w=min(width*0.32,420); led.h=min(220,height*0.22); led.radius=60;
+}
+function initParticles(){
+  tubeElectrons=[]; for(let i=0;i<120;i++) tubeElectrons.push(new TubeElectron(random(-tube.w/2+40,tube.w/2-40),random(-tube.radius*0.3,tube.radius*0.3),random(0.6,1.6)));
+  ledParticles=[]; for(let i=0;i<60;i++) ledParticles.push(new LEDParticle(random(-led.radius*0.6,led.radius*0.6),random(-led.radius*0.4,led.radius*0.4),random(0.4,1.4)));
+}
+
+function burstTubeElectrons(n){for(let i=0;i<n;i++)tubeElectrons.push(new TubeElectron(random(-tube.w/2+40,tube.w/2-40),random(-tube.radius*0.3,tube.radius*0.3),random(0.6,1.6)));}
+function burstLEDParticles(n){for(let i=0;i<n;i++)ledParticles.push(new LEDParticle(random(-led.radius*0.6,led.radius*0.6),random(-led.radius*0.4,led.radius*0.4),random(0.4,1.4)));}
+
+function draw(){
+  background(6,7,10);
+  drawRoomSurfaces();
+
+  let tubePower=Number(select('#tubePower').value());
+  let tubeEff=Number(select('#tubeEff').value());
+  let starter=select('#starter').value();
+
+  if(tubeOn){
+    if(starter==='magnetic'){if(flickerStage===1){flickerTimer+=deltaTime/1000;if(flickerTimer>1.1)flickerStage=2;}}
+    else flickerStage=2;
+  }else flickerStage=0;
+
+  let tubeIntensity=0;
+  if(flickerStage===0) tubeIntensity=0;
+  else if(flickerStage===1) tubeIntensity=map(sin(flickerTimer*25),-1,1,0.08,0.9);
+  else {let base=constrain((tubePower/36),0.25,3.0); tubeIntensity=(1-Math.exp(-base*0.9))*tubeEff; tubeIntensity=constrain(tubeIntensity,0,1.0);}
+
+  let ledPower=Number(select('#ledPower').value());
+  let ledEff=Number(select('#ledEff').value());
+  let ledMode=select('#ledMode').value();
+  let ledIntensity=0;
+  if(ledOn){let base=constrain((ledPower/20),0.05,4.0); ledIntensity=(1-Math.exp(-base*0.85))*ledEff; ledIntensity=constrain(ledIntensity,0,1.0);}
+  ledIntensity=lerp(prevLedIntensity,ledIntensity,0.1);
+  prevLedIntensity=ledIntensity;
+
+  drawTubeScene();
+  drawLEDScene();
+
+  for(let e of tubeElectrons){e.update(tubeIntensity); e.render();}
+  if(tubeIntensity>0.06 && random()<0.5) tubeUV.push(new TubeUV(random(-tube.w/2+20,tube.w/2-20),random([-1,1]),tubeIntensity));
+  for(let i=tubeUV.length-1;i>=0;i--){tubeUV[i].update(); tubeUV[i].render(); if(tubeUV[i].dead) tubeUV.splice(i,1);}
+  drawTubeGlow(tubeIntensity,tubeEff);
+
+  for(let p of ledParticles){p.update(ledIntensity,ledMode); p.render(ledMode);}
+  if(ledIntensity>0.04 && random()<0.5) ledPhosphorFlare.push(new LedFlare(random(-led.radius*0.45,led.radius*0.45),random(-led.radius*0.25,led.radius*0.25),ledIntensity));
+  for(let i=ledPhosphorFlare.length-1;i>=0;i--){ledPhosphorFlare[i].update(); ledPhosphorFlare[i].render(); if(ledPhosphorFlare[i].dead) ledPhosphorFlare.splice(i,1);}
+  drawLEDGlow(ledIntensity,ledEff);
+
+  drawRoomLighting(tubeIntensity,ledIntensity);
+  drawTubeSpectrum(tubeIntensity,tubeEff);
+  drawLEDSpectrum(ledIntensity,ledEff,ledMode);
+
+  let tubeLux=Math.round(tubePower*80*0.016*tubeIntensity);
+  let ledLux=Math.round(ledPower*110*0.02*ledIntensity);
+  select('#tubeLux').html('Tube Lux: '+tubeLux+' lx');
+  select('#ledLux').html('LED Lux: '+ledLux+' lx');
+
+  fill(190,210,255); textSize(13); textAlign(CENTER);
+  text('Tube: Gas discharge excites mercury → UV → Phosphor emits visible light',tube.x,tube.y+tube.h*1.2);
+  text('LED: Semiconductor emits blue → phosphor converts → white light',led.x,led.y+led.h*1.2);
+
+  updateReport();
+}
+
+function drawRoomSurfaces(){
+  noStroke();
+  fill(12,15,20); rect(width/2,height*0.8,width,height*0.4);
+  fill(10,12,18); rect(width/2,height*0.45,width,height*0.9);
+}
+function drawRoomLighting(tubeIntensity,ledIntensity){
+  push(); blendMode(ADD);
+  if(tubeOn){fill(200,220,255,constrain(tubeIntensity*80,0,120)); ellipse(tube.x,tube.y,tube.w*0.5*tubeIntensity,tube.h*1.2*tubeIntensity);}
+  if(ledOn){fill(255,240,180,constrain(ledIntensity*80,0,120)); ellipse(led.x,led.y-10,led.radius*1.8*ledIntensity,led.radius*1.5*ledIntensity);}
+  pop(); blendMode(BLEND);
+}
+
+function drawTubeScene(){ push(); translate(tube.x,tube.y); fill(200,220,255,10); ellipse(0,0,tube.w+50,tube.h+40); fill(12,16,22); ellipse(0,0,tube.w-8,tube.h-8); pop();}
+function drawLEDScene(){ push(); translate(led.x,led.y); fill(18); rect(0,0,led.w,led.h,12); fill(30); rect(0,-6,led.radius*0.7,led.radius*0.45,6); fill(80,140,255); ellipse(0,-12,led.radius*0.45,led.radius*0.35); pop();}
+
+// Particle classes
+class TubeElectron{constructor(x,y,s){this.x=x;this.y=y;this.baseY=y;this.speed=s;this.phase=random(360);this.size=random(1.2,3.6);}update(i){let s=this.speed*(1+i*2.0);this.x+=s*0.6;if(this.x>tube.w/2-40)this.x=-tube.w/2+40;this.phase+=6+s*2;this.y=this.baseY+sin(this.phase)*(3+i*12);}render(){push();translate(tube.x,tube.y);fill(160,170,255,120);ellipse(this.x,this.y,this.size*2.6,this.size*1.4);pop();}}
+class TubeUV{constructor(x,d,i){this.x=x;this.y=0;this.dir=d;this.speed=random(4,8)*(0.6+i*1.2);this.life=0;this.maxLife=22+int(40*i);this.dead=false;this.alpha=140+i*80;this.angle=random(-12,12);}update(){this.x+=this.dir*this.speed*0.6;this.life++;if(this.life>this.maxLife)this.dead=true;}render(){push();translate(tube.x,tube.y);strokeWeight(2.2);stroke(160,120,255,this.alpha-this.life*5);let len=22+this.life*2;if(this.dir>0){line(this.x,this.y,this.x+len*cos(this.angle),this.y+len*sin(this.angle)+tube.radius*0.9);}else{line(this.x,this.y,this.x-len*cos(this.angle),this.y-len*sin(this.angle)-tube.radius*0.9);}noStroke();pop();}}
+class LEDParticle{constructor(x,y,s){this.x=x;this.y=y;this.speed=s;this.phase=random(360);this.size=random(1.6,4.2);}update(i,m){let s=this.speed*(1+i*2.4);this.x+=random(-s*0.8,s*0.8);this.y+=sin(this.phase)*(0.8+i*6);this.phase+=4+s*2;if(this.x<-led.radius*0.8)this.x=led.radius*0.8;if(this.x>led.radius*0.8)this.x=-led.radius*0.8;}render(m){push();translate(led.x,led.y);let a=map(this.size,1.6,4.2,80,220);if(m==='phosphor'){fill(90,140,255,a);ellipse(this.x,this.y-12,this.size*1.8,this.size*1.2);fill(255,230,160,a*0.9);ellipse(this.x*0.6,this.y*0.4,this.size*1.6,this.size*1.2);}else{fill(random([255,80,60]),random([80,250,60]),random([60,160,250]),a);ellipse(this.x,this.y-12,this.size*1.6,this.size*1.1);}pop();}}
+class LedFlare{constructor(x,y,i){this.x=x;this.y=y;this.life=0;this.max=12+int(40*i);this.alpha=200;this.dead=false;}update(){this.life++;if(this.life>this.max)this.dead=true;}render(){push();translate(led.x,led.y);let s=map(this.life,0,this.max,6,36);fill(255,230,180,map(this.life,0,this.max,this.alpha,0));ellipse(this.x,this.y,s,s*0.5);pop();}}
+
+// Glows
+function drawTubeGlow(intensity,eff){push();translate(tube.x,tube.y);let g=constrain(intensity,0,1.0); for(let i=0;i<6;i++){let s=map(i,0,5,tube.w*0.5,tube.w*0.7); let a=map(i,0,5,100*g,8*g); fill(255,248,235,a*(1-i/6)); ellipse(0,0,s,tube.h*1.0+i*12);} fill(120,160,255,30*g+(1-eff)*40); ellipse(0,0,tube.w*0.4,tube.h*0.8); fill(255,230,160,30*g+eff*40); ellipse(0,0,tube.w*0.5,tube.h*0.9); pop();}
+function drawLEDGlow(intensity,eff){push();translate(led.x,led.y);let g=constrain(intensity,0,1.0); for(let i=0;i<5;i++){let s=map(i,0,4,led.radius*1.2,led.radius*1.8); let a=map(i,0,4,120*g,10); fill(255,250,235,a); ellipse(0,-10,s,s*0.5);} fill(100,150,255,30*(1-eff)*g); ellipse(0,-10,led.radius*1.2,led.radius*0.6); fill(255,230,160,30*eff*g); ellipse(0,-10,led.radius*1.4,led.radius*0.7); pop();}
+
+// Spectrums
+function drawTubeSpectrum(intensity,eff){push();translate(tube.x,tube.y+tube.h*1.9);let w=min(520,tube.w*0.56);let h=22; fill(12,15,20,200);rect(0,0,w+12,h+8,8); noStroke(); for(let i=0;i<20;i++){let x=map(i,0,20,-w/2,w/2); let wl=map(i,0,20,380,700); fill(wl<500?color(80,140,255):wl<600?color(80,255,120):color(255,240,80)); rect(x,0,w/20,h);} fill(255,255,255,180*intensity); rect(0,0,w,h); fill(200); textSize(11); textAlign(CENTER); text('Spectrum: UV → Visible (Phosphor Fluorescence)',0,h+14); pop();}
+function drawLEDSpectrum(intensity,eff,mode){push();translate(led.x,led.y+led.h*1.9);let w=min(300,led.w*0.72);let h=22; fill(12,15,20,200);rect(0,0,w+12,h+8,8); noStroke(); if(mode==='phosphor'){ for(let i=0;i<20;i++){let x=map(i,0,20,-w/2,w/2); let wl=map(i,0,20,380,700); fill(wl<500?color(80,140,255):color(255,240,120)); rect(x,0,w/20,h);} } else{ for(let i=0;i<20;i++){let x=map(i,0,20,-w/2,w/2); let wl=map(i,0,20,380,700); fill(wl<480?color(80,140,255):wl<580?color(80,255,100):color(255,100,100)); rect(x,0,w/20,h);} } fill(255,255,255,180*intensity); rect(0,0,w,h); fill(200); textSize(11); textAlign(CENTER); text('Spectrum: '+(mode==='phosphor'?'Blue + Yellow → White':'RGB Mix'),0,h+14); pop();}
+
+function windowResized(){resizeCanvas(windowWidth,windowHeight*0.8);initGeometry();}
+
+function updateReport(){
+  let tubePower=select('#tubePower').value();
+  let tubeEff=select('#tubeEff').value();
+  let tubeLux=select('#tubeLux').html().replace('Tube Lux: ','');
+  select('#tubeReport').html(`Tube Status: ${tubeOn?'ON':'OFF'} | Power: ${tubePower} W | Efficiency: ${tubeEff} | Lux: ${tubeLux}`);
+  let ledPower=select('#ledPower').value();
+  let ledEff=select('#ledEff').value();
+  let ledLux=select('#ledLux').html().replace('LED Lux: ','');
+  select('#ledReport').html(`LED Status: ${ledOn?'ON':'OFF'} | Power: ${ledPower} W | Efficiency: ${ledEff} | Lux: ${ledLux}`);
+}
+</script>
+</body>
+</html>
